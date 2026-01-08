@@ -1,0 +1,16 @@
+# Node dependencies
+node_modules
+npm-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Environment / secrets
+.env
+.env.local
+
+# OS / editor junk
+.DS_Store
+*.swp
+
+# Vercel / deployment metadata
+.vercel

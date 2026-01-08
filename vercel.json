@@ -1,0 +1,40 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "src/http/moisaHandler.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/",
+      "dest": "/configure",
+      "status": 301
+    },
+    {
+      "src": "/configure",
+      "dest": "/src/http/moisaHandler.js"
+    },
+    {
+      "src": "/manifest.json",
+      "dest": "/src/http/moisaHandler.js"
+    },
+    {
+      "src": "/stream/(.*)",
+      "dest": "/src/http/moisaHandler.js"
+    },
+    {
+      "src": "/play",
+      "dest": "/src/http/moisaHandler.js"
+    },
+    {
+      "src": "/favicon.ico",
+      "dest": "/src/http/moisaHandler.js"
+    },
+    {
+      "src": "/assets/(.*)",
+      "dest": "/src/http/moisaHandler.js"
+    }
+  ]
+}
