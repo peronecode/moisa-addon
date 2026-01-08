@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Moisa – Configuration</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        background: #0b0c10;
+        color: #f5f5f5;
+        margin: 0;
+        padding: 24px;
+      }
+      .card {
+        max-width: 640px;
+        margin: 0 auto;
+        background: #141622;
+        border-radius: 12px;
+        padding: 24px 28px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      }
+      h1 {
+        font-size: 22px;
+        margin: 0 0 12px;
+      }
+      p {
+        font-size: 14px;
+        line-height: 1.5;
+        margin: 0 0 12px;
+        color: #d0d4e4;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 6px;
+        font-weight: 600;
+      }
+      input[type='text'] {
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid #30334a;
+        background: #0b0c15;
+        color: #f5f5f5;
+        font-size: 13px;
+        box-sizing: border-box;
+      }
+      input[type='text']:focus {
+        outline: none;
+        border-color: #4f8cff;
+        box-shadow: 0 0 0 1px #4f8cff40;
+      }
+      button {
+        margin-top: 14px;
+        padding: 8px 14px;
+        border-radius: 6px;
+        border: none;
+        background: #4f8cff;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #3c76e0;
+      }
+      .field {
+        margin-bottom: 14px;
+      }
+      .output-label {
+        margin-top: 18px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 60px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid #30334a;
+        background: #0b0c15;
+        color: #f5f5f5;
+        font-size: 12px;
+        box-sizing: border-box;
+        resize: vertical;
+      }
+      code {
+        background: #111320;
+        padding: 2px 4px;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Moisa – Addon configuration</h1>
+      <p>
+        Generate a Stremio addon URL with configuration encoded as
+        <code>config=&lt;base64&gt;</code>.
+      </p>
+
+      <div class="field">
+        <label for="torrserver">TorrServer URL</label>
+        <input
+          id="torrserver"
+          type="text"
+          placeholder="http://192.168.x.x:8090"
+        />
+      </div>
+
+      <div class="field">
+        <label for="torrentioPrefix">Torrentio quality filter</label>
+        <input
+          id="torrentioPrefix"
+          type="text"
+          placeholder="qualityfilter=threed,480p,scr,cam,unknown"
+        />
+      </div>
+
+      <button id="generate-btn" type="button">Generate addon URL</button>
+
+      <div class="output-label">
+        <label for="addon-url">Addon URL</label>
+        <textarea id="addon-url" readonly></textarea>
+      </div>
+
+      <button id="install-btn" type="button">Install in Stremio</button>
+    </div>
+
+    <script>
+      (function () {
+        console.log('[moisa] config script loaded');
+
+        function b64Utf8(str) {
+          return btoa(unescape(encodeURIComponent(str)));
+        }
+
+        function getBasePath() {
+          return window.location.pathname.replace(/\/(config|configure)\/?$/, '');
+        }
+
+        function buildManifestUrl(cfg) {
+          var b64 = b64Utf8(JSON.stringify(cfg));
+          return (
+            window.location.origin +
+            getBasePath() +
+            '/manifest.json?config=' +
+            encodeURIComponent(b64)
+          );
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+          var torr = document.getElementById('torrserver');
+          var prefix = document.getElementById('torrentioPrefix');
+          var out = document.getElementById('addon-url');
+          var gen = document.getElementById('generate-btn');
+          var install = document.getElementById('install-btn');
+
+          gen.addEventListener('click', function () {
+            console.log('[moisa] generate clicked');
+
+            var cfg = {};
+            if (torr.value.trim()) cfg.torrserver = torr.value.trim();
+            if (prefix.value.trim())
+              cfg.torrentioPathPrefix = prefix.value.trim();
+
+            if (!Object.keys(cfg).length) {
+              alert('Enter at least one option');
+              return;
+            }
+
+            out.value = buildManifestUrl(cfg);
+            out.focus();
+            out.select();
+          });
+
+          install.addEventListener('click', function () {
+            console.log('[moisa] install clicked');
+
+            if (!out.value) {
+              alert('Generate the URL first');
+              return;
+            }
+
+            // Convert the HTTP(S) URL in the textarea into a stremio:// URL.
+            var url = out.value.trim();
+            // If user pasted a stremio URL, strip the scheme first
+            url = url.replace(/^stremio:\/\//i, '');
+            // Strip leading http:// or https:// if present
+            url = url.replace(/^https?:\/\//i, '');
+
+            window.location.href = 'stremio://' + url;
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>
+
+

@@ -1,0 +1,21 @@
+services:
+  torrserver:
+    image: ghcr.io/yourok/torrserver:latest
+    container_name: torrserver
+    ports:
+      - "8090:8090"
+    environment:
+      - TZ=UTC
+    restart: unless-stopped
+
+  moisa:
+    build: .
+    container_name: moisa-addon
+    depends_on:
+      - torrserver
+    ports:
+      - "8080:8080"
+    environment:
+      - TORRENTIO_BASE=https://torrentio.strem.fun
+      - PORT=8080
+    restart: unless-stopped
