@@ -30,7 +30,7 @@ const TORRENTIO_TIMEOUT_MS =
 
 const builder = new addonBuilder({
   id: 'org.stremio.moisa.addon',
-  version: '1.0.0',
+  version: '1.0.1',
   name: 'Moisa',
   description:
     'Simple addon: fetches torrents from Torrentio and redirects playback to a local TorrServer instance.',
