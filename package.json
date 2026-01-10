@@ -1,6 +1,6 @@
 {
   "name": "moisa",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Moisa - simple Stremio addon that proxies Torrentio results through TorrServer for local streaming.",
   "main": "server.js",
   "scripts": {

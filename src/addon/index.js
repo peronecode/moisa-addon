@@ -30,7 +30,7 @@ const TORRENTIO_TIMEOUT_MS =
 
 const builder = new addonBuilder({
   id: 'org.stremio.moisa.addon',
-  version: '1.0.1',
+  version: '1.1.0',
   name: 'Moisa',
   description:
     'Simple addon: fetches torrents from Torrentio and redirects playback to a local TorrServer instance.',
@@ -263,7 +263,7 @@ builder.defineStreamHandler(async ({ type, id, extra }) => {
     }
 
     // Determine the base URL of this addon (used for proxy /play URLs).
-    // Prefer an explicit environment override (e.g. SELF_BASE_URL=https://moisa-addon.vercel.app/api/moisa)
+    // Prefer an explicit environment override (e.g. SELF_BASE_URL=https://moisa.fun/api/moisa)
     // and only fall back to the value forwarded from the HTTP layer.
     const selfBase =
       process.env.SELF_BASE_URL || (extra && extra._base) || null;
