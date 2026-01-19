@@ -30,7 +30,7 @@ const TORRENTIO_TIMEOUT_MS =
 
 const builder = new addonBuilder({
   id: 'org.stremio.moisa.addon',
-  version: '1.1.0',
+  version: '1.1.1',
   name: 'Moisa',
   description:
     'Simple addon: fetches torrents from Torrentio and redirects playback to a local TorrServer instance.',
@@ -217,13 +217,20 @@ async function resolvePlayUrl({
     (filename && String(filename)) || 'video'
   );
 
+  // TorrServer `/stream` expects a 1-based file index within the torrent.
+  //
+  // Torrentio's `fileIdx` is often reliable for series episodes (multi-file
+  // torrents), but can be incorrect for some movie torrents (where we usually
+  // want the main video file).
   let index = 0;
-  if (
+  if (type === 'movie') {
+    index = 1;
+  } else if (
     fileIndex !== undefined &&
     fileIndex !== null &&
     !Number.isNaN(Number(fileIndex))
   ) {
-    // Torrentio's fileIdx is 0-based; TorrServer expects 1-based indexes.
+    // Torrentio's fileIdx is 0-based; TorrServer expects 1-based.
     index = Number(fileIndex) + 1;
   }
 
@@ -237,7 +244,8 @@ async function resolvePlayUrl({
     infoHash,
     season,
     episode,
-    fileIndex: index,
+    requestedFileIndex: fileIndex,
+    resolvedIndex: index,
     torrServerBase,
     directUrl
   });
