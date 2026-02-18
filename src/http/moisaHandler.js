@@ -49,13 +49,16 @@ module.exports = async (req, res) => {
     'Access-Control-Allow-Headers',
     'Origin, X-Requested-With, Content-Type, Accept'
   );
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
     res.end();
     return;
   }
+
+  // Handle HEAD requests (used by players to check file metadata)
+  const isHeadRequest = req.method === 'HEAD';
 
   // ---------------------------------------------------------------------------
   // Favicon: /favicon.ico -> 32x32 PNG icon used in the browser tab.
@@ -224,18 +227,30 @@ module.exports = async (req, res) => {
   }
 
   // ---------------------------------------------------------------------------
-  // Play proxy: /play?infoHash=...
+  // Play proxy: /play?infoHash=... or /play/filename.mkv?infoHash=...
   // ---------------------------------------------------------------------------
 
-  if (pathname === '/play') {
+  if (pathname === '/play' || pathname.startsWith('/play/')) {
     const cfg = decodeConfig(query);
 
     const infoHash = query.infoHash;
     const type = query.type;
     const id = query.id;
-    const filename = query.filename;
+    
+    // Extract filename from URL path or query parameter
+    let filename = query.filename;
+    if (pathname.startsWith('/play/') && pathname.length > 6) {
+      const urlFilename = decodeURIComponent(pathname.substring(6)); // Remove '/play/'
+      filename = urlFilename || filename;
+    }
+    const title = query.title;
     const fileIndex =
       query.fileIndex !== undefined ? parseInt(query.fileIndex, 10) : undefined;
+    
+    // Additional metadata for external players
+    const videoSize = query.videoSize;
+    const videoCodec = query.videoCodec;
+    const audioCodec = query.audioCodec;
 
     if (!infoHash || !type || !id) {
       res.statusCode = 400;
@@ -267,7 +282,11 @@ module.exports = async (req, res) => {
       season,
       episode,
       filename,
-      fileIndex
+      fileIndex,
+      title,
+      videoSize,
+      videoCodec,
+      audioCodec
     });
 
     try {
@@ -295,9 +314,237 @@ module.exports = async (req, res) => {
         location: directUrl
       });
 
-      res.statusCode = 302;
-      res.setHeader('Location', directUrl);
-      res.end();
+      // Check if we should proxy the stream or redirect
+      const proxyEnabled = process.env.ENABLE_PROXY_MODE !== 'false';
+      const forceProxy = req.url.includes('proxy=1');
+      const forceRedirect = req.url.includes('proxy=0');
+      
+      const shouldProxy = !forceRedirect && (
+        forceProxy || 
+        (proxyEnabled && req.headers['user-agent'] && (
+          req.headers['user-agent'].includes('VLC') || 
+          req.headers['user-agent'].includes('MPV') ||
+          req.headers['user-agent'].includes('Kodi') ||
+          req.headers['user-agent'].includes('PotPlayer') ||
+          req.headers['user-agent'].includes('MPC-') ||
+          req.headers['user-agent'].includes('IINA') ||
+          req.headers['user-agent'].includes('Infuse') ||
+          req.headers['user-agent'].includes('FireCore') ||
+          req.headers['user-agent'].includes('Apple TV') ||
+          req.headers['user-agent'].includes('tvOS')
+        ))
+      );
+
+      if (shouldProxy) {
+        // Proxy the video stream while preserving metadata headers
+        log('HTTP /play proxying stream', { directUrl });
+        
+        // Set metadata headers before proxying
+        if (filename) {
+          res.setHeader('X-Filename', encodeURIComponent(filename));
+          // Also set Content-Disposition for better filename handling
+          res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+        }
+        if (title && title !== filename) {
+          res.setHeader('X-Title', encodeURIComponent(title));
+        }
+        if (season !== undefined && !Number.isNaN(season)) {
+          res.setHeader('X-Season', String(season));
+        }
+        if (episode !== undefined && !Number.isNaN(episode)) {
+          res.setHeader('X-Episode', String(episode));
+        }
+        if (type) {
+          res.setHeader('X-Content-Type', type);
+        }
+        if (infoHash) {
+          res.setHeader('X-Info-Hash', infoHash);
+        }
+        if (videoSize) {
+          res.setHeader('X-Video-Size', videoSize);
+        }
+        if (videoCodec) {
+          res.setHeader('X-Video-Codec', videoCodec);
+        }
+        if (audioCodec) {
+          res.setHeader('X-Audio-Codec', audioCodec);
+        }
+
+        // Proxy the video stream from TorrServer
+        try {
+          const axios = require('axios');
+          
+          // Prepare headers to forward to TorrServer
+          const proxyHeaders = {
+            'User-Agent': req.headers['user-agent'] || 'Moisa-Proxy/1.0'
+          };
+          
+          // Forward Range header for seeking support
+          if (req.headers.range) {
+            proxyHeaders['Range'] = req.headers.range;
+          }
+          
+          // Forward other relevant headers
+          if (req.headers['accept-encoding']) {
+            proxyHeaders['Accept-Encoding'] = req.headers['accept-encoding'];
+          }
+
+          const requestConfig = {
+            method: isHeadRequest ? 'HEAD' : 'GET',
+            url: directUrl,
+            headers: proxyHeaders,
+            responseType: isHeadRequest ? 'text' : 'stream',
+            timeout: 30000, // 30 second timeout
+            maxRedirects: 5
+          };
+
+          log('Proxying request to TorrServer', {
+            method: requestConfig.method,
+            url: directUrl,
+            headers: proxyHeaders
+          });
+
+          const response = await axios(requestConfig);
+
+          // Set response status
+          res.statusCode = response.status;
+
+          // Forward response headers from TorrServer, preserving our metadata headers
+          const headersToSkip = ['transfer-encoding', 'connection', 'keep-alive'];
+          Object.keys(response.headers).forEach(key => {
+            const lowerKey = key.toLowerCase();
+            if (!headersToSkip.includes(lowerKey)) {
+              // Don't overwrite our custom metadata headers
+              if (!lowerKey.startsWith('x-') || !res.getHeader(key)) {
+                res.setHeader(key, response.headers[key]);
+              }
+            }
+          });
+
+          // Set additional headers for better player compatibility
+          res.setHeader('Accept-Ranges', 'bytes');
+          res.setHeader('Connection', 'close');
+          
+          // Additional headers for iOS/tvOS players like Infuse
+          const userAgent = req.headers['user-agent'] || '';
+          if (userAgent.includes('Infuse') || userAgent.includes('FireCore') || 
+              userAgent.includes('Apple TV') || userAgent.includes('tvOS') || 
+              userAgent.includes('iPhone') || userAgent.includes('iPad')) {
+            
+            // Infuse expects these for proper metadata handling
+            res.setHeader('Cache-Control', 'no-cache');
+            
+            // Better MIME type detection for Infuse
+            if (filename) {
+              const ext = filename.toLowerCase();
+              if (ext.includes('.mkv')) {
+                res.setHeader('Content-Type', 'video/x-matroska');
+              } else if (ext.includes('.mp4')) {
+                res.setHeader('Content-Type', 'video/mp4');
+              } else if (ext.includes('.avi')) {
+                res.setHeader('Content-Type', 'video/x-msvideo');
+              } else if (ext.includes('.mov')) {
+                res.setHeader('Content-Type', 'video/quicktime');
+              }
+            }
+            
+            // Enhanced filename for Infuse's library scanning
+            if (filename && season !== undefined && episode !== undefined) {
+              const enhancedFilename = `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')} - ${filename}`;
+              res.setHeader('Content-Disposition', `inline; filename="${enhancedFilename}"`);
+            }
+          }
+
+          if (isHeadRequest) {
+            // For HEAD requests, just end without body
+            res.end();
+          } else {
+            // For GET requests, pipe the video stream
+            response.data.on('error', (streamError) => {
+              logError('Stream error during proxy', {
+                message: streamError.message,
+                directUrl
+              });
+              if (!res.headersSent) {
+                res.statusCode = 500;
+                res.end();
+              }
+            });
+
+            res.on('close', () => {
+              // Clean up if client disconnects
+              if (response.data.destroy) {
+                response.data.destroy();
+              }
+            });
+
+            response.data.pipe(res);
+          }
+          
+        } catch (proxyError) {
+          logError('Failed to proxy video stream', {
+            message: proxyError.message,
+            status: proxyError.response ? proxyError.response.status : 'unknown',
+            directUrl
+          });
+          
+          // Better error handling
+          if (proxyError.code === 'ECONNREFUSED' || proxyError.code === 'ENOTFOUND') {
+            res.statusCode = 502; // Bad Gateway
+            res.end(JSON.stringify({ err: 'TorrServer unavailable' }));
+          } else if (proxyError.response && proxyError.response.status) {
+            res.statusCode = proxyError.response.status;
+            res.end();
+          } else {
+            // Fallback to redirect if proxy fails
+            res.statusCode = 302;
+            res.setHeader('Location', directUrl);
+            res.end();
+          }
+        }
+        
+      } else {
+        // Standard redirect for regular Stremio players
+        // Set metadata headers for external players that might parse them
+        if (filename) {
+          res.setHeader('X-Filename', encodeURIComponent(filename));
+        }
+        if (title && title !== filename) {
+          res.setHeader('X-Title', encodeURIComponent(title));
+        }
+        if (season !== undefined && !Number.isNaN(season)) {
+          res.setHeader('X-Season', String(season));
+        }
+        if (episode !== undefined && !Number.isNaN(episode)) {
+          res.setHeader('X-Episode', String(episode));
+        }
+        if (type) {
+          res.setHeader('X-Content-Type', type);
+        }
+        if (infoHash) {
+          res.setHeader('X-Info-Hash', infoHash);
+        }
+        if (videoSize) {
+          res.setHeader('X-Video-Size', videoSize);
+        }
+        if (videoCodec) {
+          res.setHeader('X-Video-Codec', videoCodec);
+        }
+        if (audioCodec) {
+          res.setHeader('X-Audio-Codec', audioCodec);
+        }
+
+        log('HTTP /play redirect', {
+          type,
+          id,
+          infoHash,
+          location: directUrl
+        });
+
+        res.statusCode = 302;
+        res.setHeader('Location', directUrl);
+        res.end();
+      }
     } catch (err) {
       logError('Moisa HTTP play proxy error', {
         message: err.message || String(err),
@@ -306,6 +553,53 @@ module.exports = async (req, res) => {
       res.statusCode = 500;
       res.end(JSON.stringify({ err: 'play handler error' }));
     }
+    return;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Playlist endpoint: /playlist.m3u8?infoHash=... (for Infuse and similar players)
+  // ---------------------------------------------------------------------------
+  
+  if ((pathname === '/playlist.m3u8' || pathname.endsWith('.m3u8')) && 
+      process.env.ENABLE_M3U8_PLAYLISTS === 'true') {
+    const infoHash = query.infoHash;
+    const filename = query.filename || 'video.mkv';
+    const title = query.title || filename;
+    const season = query.season;
+    const episode = query.episode;
+    
+    if (!infoHash) {
+      res.statusCode = 400;
+      res.end('Missing infoHash parameter');
+      return;
+    }
+
+    // Build the play URL - ensure it doesn't create a circular reference
+    const playQuery = { ...query };
+    delete playQuery.playlist; // Remove any playlist parameter to avoid loops
+    
+    const playUrl = `${baseUrl}/play/${encodeURIComponent(filename)}?${new URLSearchParams(playQuery).toString()}`;
+
+    // Create an M3U8 playlist with metadata
+    let playlist = '#EXTM3U\n';
+    playlist += '#EXT-X-VERSION:3\n';
+    playlist += '#EXT-X-TARGETDURATION:3600\n';
+    playlist += '#EXT-X-MEDIA-SEQUENCE:0\n';
+    
+    // Add metadata for Infuse
+    if (season && episode) {
+      playlist += `#EXTINF:-1,S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')} - ${title}\n`;
+    } else {
+      playlist += `#EXTINF:-1,${title}\n`;
+    }
+    
+    playlist += `${playUrl}\n`;
+    playlist += '#EXT-X-ENDLIST\n';
+
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.statusCode = 200;
+    res.end(playlist);
     return;
   }
 
