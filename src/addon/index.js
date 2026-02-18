@@ -24,6 +24,11 @@ const TORRSERVER_URL =
 const TORRENTIO_TIMEOUT_MS =
   Number(process.env.TORRENTIO_TIMEOUT_MS) || 25000;
 
+// Enable proxy mode by default for external players
+// Set to 'false' to disable automatic proxy detection
+const ENABLE_PROXY_MODE = 
+  process.env.ENABLE_PROXY_MODE !== 'false';
+
 // ---------------------------------------------------------------------------
 // Addon manifest
 // ---------------------------------------------------------------------------
@@ -94,7 +99,9 @@ function buildPlayProxyUrl({
   episode,
   torrServerBase,
   filename,
-  fileIndex
+  fileIndex,
+  title,
+  candidate
 }) {
   if (!selfBase || !infoHash) return null;
 
@@ -115,6 +122,41 @@ function buildPlayProxyUrl({
   }
   if (fileIndex !== undefined && fileIndex !== null) {
     params.set('fileIndex', String(fileIndex));
+  }
+  
+  // Add additional metadata for external players
+  if (title && title !== filename) {
+    params.set('title', title);
+  }
+  
+  // Add video quality information if available
+  if (candidate && candidate.behaviorHints) {
+    if (candidate.behaviorHints.videoSize) {
+      params.set('videoSize', candidate.behaviorHints.videoSize);
+    }
+    if (candidate.behaviorHints.videoCodec) {
+      params.set('videoCodec', candidate.behaviorHints.videoCodec);
+    }
+    if (candidate.behaviorHints.audioCodec) {
+      params.set('audioCodec', candidate.behaviorHints.audioCodec);
+    }
+  }
+  
+  // Add proxy mode if enabled
+  if (ENABLE_PROXY_MODE) {
+    params.set('proxy', '1');
+  }
+
+  // Create descriptive URLs for better player support (especially Infuse)
+  if (filename && filename !== 'video') {
+    // Clean filename for URL safety
+    const safeFilename = encodeURIComponent(filename.replace(/[<>:"/\\|?*]/g, ''));
+    
+    // M3U8 playlist URLs are available but not used by default
+    // They can be accessed via /playlist.m3u8?... if needed
+    // For now, use direct play URLs for better compatibility
+    
+    return `${base}/play/${safeFilename}?${params.toString()}`;
   }
 
   return `${base}/play?${params.toString()}`;
@@ -149,8 +191,29 @@ async function buildStremioStreamFromCandidate({
     return null;
   }
 
-  const filename =
-    (candidate.behaviorHints && candidate.behaviorHints.filename) || '';
+  // Extract filename with better fallback logic
+  let filename = (candidate.behaviorHints && candidate.behaviorHints.filename) || '';
+  
+  // If no filename in behaviorHints, try to construct one from available data
+  if (!filename && candidate.title) {
+    filename = candidate.title;
+    
+    // Clean up the title to make it a better filename
+    filename = filename
+      .replace(/[<>:"/\\|?*]/g, '') // Remove invalid filename characters
+      .replace(/\s+/g, '.') // Replace spaces with dots
+      .trim();
+      
+    // Add some basic extension detection if missing
+    if (!filename.match(/\.(mkv|mp4|avi|mov|wmv|flv|webm)$/i)) {
+      filename += '.mkv'; // Default to .mkv for torrents
+    }
+  }
+  
+  // Final fallback to candidate name or generic name
+  if (!filename) {
+    filename = candidate.name || 'video.mkv';
+  }
 
   // Torrentio usually provides fileIdx which matches the internal index of
   // the file within the torrent. We pass this through to `/play` and later
@@ -175,7 +238,9 @@ async function buildStremioStreamFromCandidate({
     episode,
     torrServerBase,
     filename,
-    fileIndex
+    fileIndex,
+    title,
+    candidate
   });
 
   if (!streamUrl) {
@@ -187,11 +252,47 @@ async function buildStremioStreamFromCandidate({
     return null;
   }
 
-  return {
+  // Build enhanced stream object with metadata for external players
+  const streamObject = {
     name,
     title,
     url: streamUrl
   };
+
+  // Add behavioral hints and metadata that external players can use
+  if (candidate.behaviorHints || filename || fileIndex !== undefined) {
+    streamObject.behaviorHints = {};
+    
+    // Pass through original behaviorHints from Torrentio
+    if (candidate.behaviorHints) {
+      Object.assign(streamObject.behaviorHints, candidate.behaviorHints);
+    }
+    
+    // Ensure filename is available for external players
+    if (filename && !streamObject.behaviorHints.filename) {
+      streamObject.behaviorHints.filename = filename;
+    }
+    
+    // Add file index information for multi-file torrents
+    if (fileIndex !== undefined) {
+      streamObject.behaviorHints.fileIndex = fileIndex;
+    }
+  }
+
+  // Add additional metadata that external players might need
+  if (candidate.infoHash) {
+    streamObject.behaviorHints = streamObject.behaviorHints || {};
+    streamObject.behaviorHints.infoHash = candidate.infoHash;
+  }
+
+  // Add season/episode info for series
+  if (season !== undefined || episode !== undefined) {
+    streamObject.behaviorHints = streamObject.behaviorHints || {};
+    if (season !== undefined) streamObject.behaviorHints.season = season;
+    if (episode !== undefined) streamObject.behaviorHints.episode = episode;
+  }
+
+  return streamObject;
 }
 
 /**
@@ -244,6 +345,8 @@ async function resolvePlayUrl({
     infoHash,
     season,
     episode,
+    filename: filename,
+    safeName: safeName,
     requestedFileIndex: fileIndex,
     resolvedIndex: index,
     torrServerBase,
