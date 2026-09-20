@@ -37,7 +37,8 @@
         margin-bottom: 6px;
         font-weight: 600;
       }
-      input[type='text'] {
+      input[type='text'],
+      input[type='password'] {
         width: 100%;
         padding: 8px 10px;
         border-radius: 6px;
@@ -47,7 +48,8 @@
         font-size: 13px;
         box-sizing: border-box;
       }
-      input[type='text']:focus {
+      input[type='text']:focus,
+      input[type='password']:focus {
         outline: none;
         border-color: #4f8cff;
         box-shadow: 0 0 0 1px #4f8cff40;
@@ -109,6 +111,16 @@
       </div>
 
       <div class="field">
+        <label for="torrserverUser">TorrServer username (optional)</label>
+        <input id="torrserverUser" type="text" autocomplete="username" />
+      </div>
+
+      <div class="field">
+        <label for="torrserverPass">TorrServer password (optional)</label>
+        <input id="torrserverPass" type="password" autocomplete="current-password" />
+      </div>
+
+      <div class="field">
         <label for="torrentioPrefix">Torrentio quality filter</label>
         <input
           id="torrentioPrefix"
@@ -128,7 +140,7 @@
       <br />
       <br />
       <p>
-        Moisa addon version: <strong>1.1.1</strong>
+        Moisa addon version: <strong>1.2.0</strong>
         <br />
         Collaborate or report issues on
         <a
@@ -164,6 +176,8 @@
 
         document.addEventListener('DOMContentLoaded', function () {
           var torr = document.getElementById('torrserver');
+          var user = document.getElementById('torrserverUser');
+          var pass = document.getElementById('torrserverPass');
           var prefix = document.getElementById('torrentioPrefix');
           var out = document.getElementById('addon-url');
           var gen = document.getElementById('generate-btn');
@@ -174,6 +188,8 @@
 
             var cfg = {};
             if (torr.value.trim()) cfg.torrserver = torr.value.trim();
+            if (user.value) cfg.torrserverUser = user.value;
+            if (user.value || pass.value) cfg.torrserverPass = pass.value;
             if (prefix.value.trim())
               cfg.torrentioPathPrefix = prefix.value.trim();
 

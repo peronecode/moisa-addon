@@ -2,6 +2,8 @@ const addonInterface = require('../addon');
 const { log, logError } = require('../utils/logger');
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios');
+const { pipeline } = require('stream/promises');
 
 /**
  * Decode a `config=<base64>` query parameter into a plain object.
@@ -199,13 +201,23 @@ module.exports = async (req, res) => {
     const extra = {
       ...(query || {}),
       ...(cfg && cfg.torrserver ? { torrserver: cfg.torrserver } : {}),
+      ...(cfg && typeof cfg.torrserverUser === 'string'
+        ? { torrserverUser: cfg.torrserverUser }
+        : {}),
+      ...(cfg && typeof cfg.torrserverPass === 'string'
+        ? { torrserverPass: cfg.torrserverPass }
+        : {}),
       ...(cfg && cfg.torrentioPathPrefix
         ? { torrentioPathPrefix: cfg.torrentioPathPrefix }
         : {}),
       _base: baseUrl
     };
 
-    log('HTTP /stream', { type, id, extra });
+    const loggedExtra = { ...extra };
+    delete loggedExtra.config;
+    delete loggedExtra.torrserverUser;
+    delete loggedExtra.torrserverPass;
+    log('HTTP /stream', { type, id, extra: loggedExtra });
 
     try {
       const response = await addonInterface.get('stream', type, id, extra);
@@ -254,6 +266,15 @@ module.exports = async (req, res) => {
       process.env.TORRSERVER_URL ||
       'http://127.0.0.1:8090';
 
+    const torrserverUser =
+      query.torrserverUser !== undefined
+        ? query.torrserverUser
+        : cfg && cfg.torrserverUser;
+    const torrserverPass =
+      query.torrserverPass !== undefined
+        ? query.torrserverPass
+        : cfg && cfg.torrserverPass;
+
     const season =
       query.season !== undefined ? parseInt(query.season, 10) : undefined;
     const episode =
@@ -288,6 +309,57 @@ module.exports = async (req, res) => {
         return;
       }
 
+      if (
+        typeof torrserverUser === 'string' &&
+        torrserverUser &&
+        typeof torrserverPass === 'string'
+      ) {
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        res.once('close', abort);
+
+        try {
+          const upstream = await axios.request({
+            url: directUrl,
+            method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+            responseType: 'stream',
+            signal: controller.signal,
+            decompress: false,
+            validateStatus: () => true,
+            headers: {
+              Authorization:
+                'Basic ' +
+                Buffer.from(`${torrserverUser}:${torrserverPass}`, 'utf8').toString(
+                  'base64'
+                ),
+              ...(req.headers.range ? { Range: req.headers.range } : {}),
+              ...(req.headers['if-range']
+                ? { 'If-Range': req.headers['if-range'] }
+                : {})
+            }
+          });
+
+          res.statusCode = upstream.status;
+          for (const header of [
+            'content-type',
+            'content-length',
+            'content-range',
+            'accept-ranges',
+            'content-encoding',
+            'etag',
+            'last-modified'
+          ]) {
+            if (upstream.headers[header] !== undefined) {
+              res.setHeader(header, upstream.headers[header]);
+            }
+          }
+          await pipeline(upstream.data, res);
+        } finally {
+          res.off('close', abort);
+        }
+        return;
+      }
+
       log('HTTP /play redirect', {
         type,
         id,
@@ -303,6 +375,10 @@ module.exports = async (req, res) => {
         message: err.message || String(err),
         stack: err.stack
       });
+      if (res.headersSent || res.destroyed) {
+        res.destroy();
+        return;
+      }
       res.statusCode = 500;
       res.end(JSON.stringify({ err: 'play handler error' }));
     }

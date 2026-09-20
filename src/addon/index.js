@@ -30,7 +30,7 @@ const TORRENTIO_TIMEOUT_MS =
 
 const builder = new addonBuilder({
   id: 'org.stremio.moisa.addon',
-  version: '1.1.1',
+  version: '1.2.0',
   name: 'Moisa',
   description:
     'Simple addon: fetches torrents from Torrentio and redirects playback to a local TorrServer instance.',
@@ -93,6 +93,8 @@ function buildPlayProxyUrl({
   season,
   episode,
   torrServerBase,
+  torrserverUser,
+  torrserverPass,
   filename,
   fileIndex
 }) {
@@ -106,6 +108,10 @@ function buildPlayProxyUrl({
   params.set('id', id);
 
   if (torrServerBase) params.set('torrserver', torrServerBase);
+  if (torrserverUser) params.set('torrserverUser', torrserverUser);
+  if (typeof torrserverPass === 'string') {
+    params.set('torrserverPass', torrserverPass);
+  }
   if (filename) params.set('filename', filename);
   if (season !== undefined && season !== null) {
     params.set('season', String(season));
@@ -131,6 +137,8 @@ async function buildStremioStreamFromCandidate({
   type,
   id,
   torrServerBase,
+  torrserverUser,
+  torrserverPass,
   selfBase,
   season,
   episode
@@ -174,6 +182,8 @@ async function buildStremioStreamFromCandidate({
     season,
     episode,
     torrServerBase,
+    torrserverUser,
+    torrserverPass,
     filename,
     fileIndex
   });
@@ -266,7 +276,7 @@ builder.defineStreamHandler(async ({ type, id, extra }) => {
       (extra && extra.torrserver) || TORRSERVER_URL || null;
 
     if (!torrServerBase) {
-      logWarn('No TorrServer base URL configured', { type, id, extra });
+      logWarn('No TorrServer base URL configured', { type, id });
       return { streams: [] };
     }
 
@@ -334,6 +344,8 @@ builder.defineStreamHandler(async ({ type, id, extra }) => {
               type,
               id,
               torrServerBase,
+              torrserverUser: extra && extra.torrserverUser,
+              torrserverPass: extra && extra.torrserverPass,
               selfBase,
               season,
               episode
