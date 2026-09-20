@@ -56,6 +56,48 @@ TorrServer will be available on port `8090` on the host at the same time.
 - **Torrentio quality filter**: optionally set a custom Torrentio `qualityfilter=threed,480p,scr,cam,unknown` string.
 - Click **Generate addon URL** and use the output as the **Install addon** URL in Stremio, or click **Install in Stremio** to open it directly.
 
+### Environment Variables
+
+The following environment variables can be set to configure Moisa:
+
+- **`TORRSERVER_URL`**: Base URL of your TorrServer instance (default: `http://127.0.0.1:8090`)
+- **`TORRENTIO_BASE`**: Base URL of the Torrentio API (default: `https://torrentio.strem.fun`)
+- **`TORRENTIO_PATH_PREFIX`**: Quality filter for Torrentio requests (default: `qualityfilter=threed,480p,scr,cam,unknown`)
+- **`TORRENTIO_TIMEOUT_MS`**: Timeout for Torrentio requests in milliseconds (default: `25000`)
+- **`ENABLE_PROXY_MODE`**: Enable streaming proxy mode for external players to preserve metadata (default: `true`)
+- **`ENABLE_M3U8_PLAYLISTS`**: Enable M3U8 playlist support for advanced Infuse integration (default: `false`)
+- **`SELF_BASE_URL`**: Override the auto-detected base URL for this addon (useful for reverse proxies)
+
+Example:
+```bash
+TORRSERVER_URL=http://192.168.1.100:8090 \
+ENABLE_PROXY_MODE=true \
+npm start
+```
+
+### External Player Support
+
+Moisa automatically detects and provides enhanced metadata support for external players including:
+
+- **Desktop Players**: VLC, MPV, PotPlayer, MPC-HC, IINA, Kodi
+- **iOS/tvOS Players**: Infuse, Apple TV native player
+- **Mobile Players**: VLC for iOS/Android
+
+**For Infuse Users:**
+- Automatic metadata preservation with proper filenames
+- Enhanced episode naming (S01E05 format) for library organization  
+- Optimized MIME type detection for better compatibility
+- Support for seeking and resume functionality
+
+**Manual Control:**
+```
+# Force proxy mode for any player:
+http://your-moisa-url/play?infoHash=...&proxy=1
+
+# Force redirect mode (disable proxy):
+http://your-moisa-url/play?infoHash=...&proxy=0
+```
+
 ### Flows
 
 #### Direct Torrentio usage in Stremio flow
