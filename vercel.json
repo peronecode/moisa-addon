@@ -21,7 +21,15 @@
       "dest": "/src/http/moisaHandler.js"
     },
     {
+      "src": "/[^/]+/manifest.json",
+      "dest": "/src/http/moisaHandler.js"
+    },
+    {
       "src": "/stream/(.*)",
+      "dest": "/src/http/moisaHandler.js"
+    },
+    {
+      "src": "/[^/]+/stream/(.*)",
       "dest": "/src/http/moisaHandler.js"
     },
     {

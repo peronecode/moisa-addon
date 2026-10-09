@@ -8,7 +8,7 @@ const { pipeline } = require('stream/promises');
 /**
  * Decode a `config=<base64>` query parameter into a plain object.
  */
-function decodeConfig(query) {
+function decodeConfigQuery(query) {
   if (!query || !query.config) return null;
   try {
     const json = Buffer.from(String(query.config), 'base64').toString('utf8');
@@ -20,15 +20,51 @@ function decodeConfig(query) {
 }
 
 /**
+ * Try to decode a URL path segment as a base64-encoded JSON config.
+ * Returns `{ cfg, rest }` where `rest` is the pathname with the config
+ * segment removed, or `null` if the segment is not valid config.
+ */
+function extractPathConfig(pathname) {
+  // Static routes that must never be mistaken for a config token.
+  if (
+    pathname === '/' ||
+    pathname === '/manifest.json' ||
+    pathname.startsWith('/stream/') ||
+    pathname === '/play' ||
+    pathname === '/config' ||
+    pathname === '/configure' ||
+    pathname === '/favicon.ico' ||
+    pathname.startsWith('/assets/')
+  ) {
+    return null;
+  }
+  // The config segment is the first path part: /<config>/manifest.json
+  const firstSlash = pathname.indexOf('/', 1);
+  if (firstSlash === -1) return null;
+  const segment = decodeURIComponent(pathname.slice(1, firstSlash));
+  const rest = pathname.slice(firstSlash) || '/';
+  try {
+    const json = Buffer.from(segment, 'base64').toString('utf8');
+    const cfg = JSON.parse(json);
+    if (cfg && typeof cfg === 'object') return { cfg, rest };
+  } catch {
+    // Not a valid config segment – fall through.
+  }
+  return null;
+}
+
+/**
  * Main HTTP handler used both for local `server.js` and Vercel `api/moisa.js`.
  *
  * Routes:
- *   - GET /favicon.ico                     – 32x32 browser tab icon.
- *   - GET /assets/*                       – static assets (PNG/SVG/WebP icons, logos, etc.).
- *   - GET /manifest.json                  – Stremio addon manifest (includes `logo` field).
- *   - GET /stream/:type/:id.json          – Stremio stream resource.
- *   - GET /play?infoHash=...              – proxy that resolves to a direct TorrServer URL.
- *   - GET /config or /configure           – lightweight HTML config UI.
+ *   - GET /favicon.ico                          – 32x32 browser tab icon.
+ *   - GET /assets/*                            – static assets (PNG/SVG/WebP icons, logos, etc.).
+ *   - GET /manifest.json                       – Stremio addon manifest (includes `logo` field).
+ *   - GET /:config/manifest.json               – manifest (config as base64 path segment).
+ *   - GET /stream/:type/:id.json               – Stremio stream resource.
+ *   - GET /:config/stream/:type/:id.json       – stream (config as base64 path segment).
+ *   - GET /play?infoHash=...                   – proxy that resolves to a direct TorrServer URL.
+ *   - GET /config or /configure                – lightweight HTML config UI.
  */
 module.exports = async (req, res) => {
   // Derive a full URL object from the incoming request.
@@ -42,8 +78,21 @@ module.exports = async (req, res) => {
   const baseUrl = `${baseProto}://${baseHost}`;
 
   // Normalized path relative to the API root, e.g. "/manifest.json".
-  const pathname = fullUrl.pathname.replace(/^\/api\/moisa/, '') || '/';
+  let pathname = fullUrl.pathname.replace(/^\/api\/moisa/, '') || '/';
   const query = Object.fromEntries(fullUrl.searchParams.entries());
+
+  // ---------------------------------------------------------------------------
+  // Config-in-path: /<base64-config>/manifest.json or /<base64-config>/stream/…
+  // Stremio transport requires the addon URL to end with /manifest.json (no
+  // query string). Config is therefore carried as a path segment, and we
+  // extract it here before the regular route matching.
+  // ---------------------------------------------------------------------------
+  let pathConfig = null;
+  const extracted = extractPathConfig(pathname);
+  if (extracted) {
+    pathConfig = extracted.cfg;
+    pathname = extracted.rest;
+  }
 
   // CORS – needed for Stremio Web.
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -52,6 +101,7 @@ module.exports = async (req, res) => {
     'Origin, X-Requested-With, Content-Type, Accept'
   );
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
@@ -197,7 +247,7 @@ module.exports = async (req, res) => {
     const host = req.headers.host;
     const baseUrl = `${proto}://${host}`;
 
-    const cfg = decodeConfig(query);
+    const cfg = pathConfig || decodeConfigQuery(query);
     const extra = {
       ...(query || {}),
       ...(cfg && cfg.torrserver ? { torrserver: cfg.torrserver } : {}),
@@ -240,7 +290,7 @@ module.exports = async (req, res) => {
   // ---------------------------------------------------------------------------
 
   if (pathname === '/play') {
-    const cfg = decodeConfig(query);
+    const cfg = pathConfig || decodeConfigQuery(query);
 
     const infoHash = query.infoHash;
     const type = query.type;

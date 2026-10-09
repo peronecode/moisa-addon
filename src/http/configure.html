@@ -169,8 +169,9 @@
           return (
             window.location.origin +
             getBasePath() +
-            '/manifest.json?config=' +
-            encodeURIComponent(b64)
+            '/' +
+            encodeURIComponent(b64) +
+            '/manifest.json'
           );
         }
 
